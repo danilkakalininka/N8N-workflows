@@ -1,0 +1,149 @@
+function transferIncomes() {
+  var webhookUrl = 'https://n8n.YOURDOMAIN.com/webhook'; 
+  
+  var labelName = 'YOUR_LABEL_NAME';
+  var mainSpreadsheetId = 'YOUR_SPREADSHEET_ID';
+  var mainSheetName = 'YOUR_SPREADSHEET_NAME';
+
+  var label = GmailApp.getUserLabelByName(labelName);
+  if (!label) return; 
+
+  var threads = label.getThreads();
+  if (threads.length === 0) return;
+
+  var mainSpreadsheet = SpreadsheetApp.openById(mainSpreadsheetId);
+  var mainSheet = mainSpreadsheet.getSheetByName(mainSheetName);
+
+  var existingData = mainSheet.getRange("G2:G" + (mainSheet.getLastRow() || 2)).getValues();
+  var existingTransactionIds = new Set(existingData.map(row => row[0]).filter(id => id !== ''));
+
+  var processedThreads = [];
+
+  for (var i = 0; i < threads.length; i++) {
+    var thread = threads[i];
+    var messages = thread.getMessages();
+    
+    var threadHasErrors = false;
+    var validMessagesProcessedCount = 0;
+
+    for (var j = messages.length - 1; j >= 0; j--) {
+      var message = messages[j];
+      var body = message.getPlainBody();
+
+      var transactionIDRegex = /\*Transaction ID\*\s*([\w\d]+)/i;
+      var transactionIDMatch = body.match(transactionIDRegex);
+      var transactionID = transactionIDMatch ? transactionIDMatch[1] : '';
+
+      if (!transactionID || existingTransactionIds.has(transactionID)) {
+        continue;
+      }
+
+      var amountRegex = /YOU RECEIVED\s*([$€£])([\d,]+\.\d{2})\s*([A-Z]{3})/i;  //this one is good for income messages from PayPal, but change it as you wish
+      var amountMatch = body.match(amountRegex);
+      var amount = '', currency = '';
+      if (amountMatch) {
+        amount = amountMatch[2].replace(',', ''); 
+        currency = amountMatch[3]; 
+      } else {
+        var fallbackRegex = /([€$£])\s?([\d,]+(?:\.\d{1,2})?)\s?(USD|EUR|GBP)?/i;
+        var fallbackMatch = body.match(fallbackRegex);
+        if (fallbackMatch) {
+           var symbol = fallbackMatch[1];
+           amount = fallbackMatch[2].replace(',', '');
+           currency = fallbackMatch[3] || (symbol === '$' ? 'USD' : (symbol === '€' ? 'EUR' : 'GBP'));
+        }
+      }
+      var amountForSheet = amount.replace('.', ',');
+
+      var senderMatch = body.match(/from\s+([\s\S]*?)(?:Transaction Details|$)/i);
+      var senderName = senderMatch ? senderMatch[1].trim().replace(/\s+/g, ' ') : '';
+
+      var recipientEmailRaw = message.getTo();
+      var recipientMatch = recipientEmailRaw.match(/<(.+)>/);
+      var recipientName = recipientMatch ? recipientEmailRaw.split('<')[0].trim() : recipientEmailRaw;
+      var recipientEmail = recipientMatch ? recipientMatch[1] : '';
+
+      var msgDate = message.getDate();
+      var formattedDate = Utilities.formatDate(msgDate, Session.getScriptTimeZone(), "dd.MM.yyyy");
+      var formattedDateTime = Utilities.formatDate(msgDate, Session.getScriptTimeZone(), "dd.MM.yyyy HH:mm:ss");
+
+      var webhookSuccess = false;
+      
+      var webhookPayload = {
+        "transactionId": transactionID,
+        "amount": amount,
+        "currency": currency,
+        "sender": senderName,
+        "recipientName": recipientName,
+        "recipientEmail": recipientEmail,
+        "date": formattedDateTime,
+        "subject": message.getSubject(),
+        "gmailId": message.getId()
+      };
+
+      try {
+        var response = UrlFetchApp.fetch(webhookUrl, {
+          'method' : 'post',
+          'contentType': 'application/json',
+          'payload' : JSON.stringify(webhookPayload),
+          'muteHttpExceptions': true 
+        });
+        
+        var responseCode = response.getResponseCode();
+        
+        if (responseCode >= 200 && responseCode < 300) {
+          webhookSuccess = true;
+          Logger.log('✅ Webhook sent: ' + transactionID);
+        } else {
+          Logger.log('🔥 Webhook failure (code ' + responseCode + '): ' + response.getContentText());
+          threadHasErrors = true; 
+        }
+
+      } catch (e) {
+        Logger.log('🔥 Critical network issue: ' + e);
+        threadHasErrors = true; 
+      }
+
+      if (webhookSuccess) {
+        mainSheet.insertRowBefore(2);
+        
+        mainSheet.getRange(2, 1).setValue(formattedDate).setBackground(null); 
+        mainSheet.getRange(2, 2)
+          .setValue(formattedDateTime)
+          .setBackground(null)
+          .setNumberFormat("HH:mm:ss");
+
+        mainSheet.getRange(2, 3).setValue(recipientName).setBackground(null);
+        mainSheet.getRange(2, 4).setValue(recipientEmail).setBackground(null);
+        mainSheet.getRange(2, 5).setValue(amountForSheet).setBackground(null);
+        mainSheet.getRange(2, 6).setValue(currency).setBackground(null);
+        mainSheet.getRange(2, 7).setValue(transactionID).setBackground(null);
+        mainSheet.getRange(2, 8).setValue(senderName).setBackground(null);
+
+        existingTransactionIds.add(transactionID);
+        validMessagesProcessedCount++;
+      }
+    }
+
+    if (validMessagesProcessedCount > 0 && !threadHasErrors) {
+      processedThreads.push(thread);
+    } else if (threadHasErrors) {
+      Logger.log('⚠️ Thread still in Inbox because Webhook fails');
+    }
+  }
+
+  if (processedThreads.length > 0) {
+    label.removeFromThreads(processedThreads);
+  }
+
+  try {
+    var lastRow = mainSheet.getLastRow();
+    if (lastRow > 2) {
+      mainSheet.getRange(2, 1, lastRow - 1, 8).sort([
+        { column: 1, ascending: false }, 
+        { column: 2, ascending: false } 
+      ]);
+    }
+    mainSheet.getRange('B:B').setNumberFormat("HH:mm:ss");
+  } catch (e) {}
+}
