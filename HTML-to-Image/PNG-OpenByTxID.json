@@ -1,0 +1,313 @@
+{
+  "name": "PNG-OpenByTxID",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const transactionId = $json.query?.transactionId;\n\nif (!transactionId) {\n  throw new Error(\"transactionId not provided in URL query\");\n}\n\nreturn [\n  {\n    json: {\n      transactionId,\n      baseUrl: $json.headers?.host ? `${$json.headers?.['x-forwarded-proto'] || 'http'}://${$json.headers.host}` : 'http://localhost:5678'\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        -32
+      ],
+      "id": "502b18d0-c567-4ddf-a3c8-baf2c8b4c00d",
+      "name": "Extract TransactionId"
+    },
+    {
+      "parameters": {
+        "jsCode": "const transactionId = $json.transactionId;\n// IMPORTANT: Submit yourdomain \nconst screenshotUrl = `https://n8n.yourdomain.com/webhook/get-transaction-screenshot?transactionId=${transactionId}`;\n\nconst htmlContent = `\n<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"UTF-8\">\n    <style>\n        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f0f2f5; }\n        .card { background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; max-width: 500px; width: 90%; }\n        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }\n        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }\n        #screenshotImage { width: 100%; border-radius: 8px; display: none; }\n    </style>\n</head>\n<body>\n    <div class=\"card\">\n        <div id=\"loading\">\n            <h3>Loading Screenshot...</h3>\n            <div class=\"loader\"></div>\n        </div>\n        <img id=\"screenshotImage\" alt=\"Transaction Screenshot\">\n        <p id=\"error\" style=\"display:none; color:red;\">Loading error</p>\n    </div>\n\n    <script>\n        async function load() {\n            try {\n                const res = await fetch('${screenshotUrl}');\n                if (!res.ok) throw new Error();\n                const blob = await res.blob();\n                document.getElementById('loading').style.display = 'none';\n                const img = document.getElementById('screenshotImage');\n                img.src = URL.createObjectURL(blob);\n                img.style.display = 'block';\n            } catch (e) {\n                document.getElementById('loading').style.display = 'none';\n                document.getElementById('error').style.display = 'block';\n            }\n        }\n        load();\n    </script>\n</body>\n</html>`;\n\nreturn [{ json: { html: htmlContent } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        -32
+      ],
+      "id": "2e46a45c-1717-449f-9087-4ded6cf6092d",
+      "name": "Prepare Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1303133-f89b-4f34-baad-976a1e97b15e",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "item 0",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        736,
+        -16
+      ],
+      "id": "387cbc9f-4847-4d01-8cc1-2de92d771fde",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 1,
+        "simple": false,
+        "filters": {
+          "q": "={{ $json.query.transactionId }}"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        512,
+        -16
+      ],
+      "id": "71ec1b34-1648-419b-b985-bd8bb1c87f1d",
+      "name": "youremail@gmail.com",
+      "webhookId": "2fa37cf1-f51e-49ce-a040-0283d5ad5c72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "yRG9VOWPdlE6m6KU",
+          "name": "youremail@gmail.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "operation": "getScreenshot",
+        "fullPage": true,
+        "options": {
+          "device": "iPhone 15 Pro Max",
+          "waitUntil": "load",
+          "headless": true
+        }
+      },
+      "type": "n8n-nodes-puppeteer.puppeteer",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -32
+      ],
+      "id": "5800a298-34fb-4da2-be34-f61befaf6500",
+      "name": "Puppeteer"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        32,
+        -32
+      ],
+      "id": "21f27b1e-50ee-47f1-a3e1-1d6965e6cc03",
+      "name": "GiveLoading"
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "responseDataSource": "set",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1360,
+        -32
+      ],
+      "id": "c426d182-99b4-450c-b0da-0ca29d58c322",
+      "name": "GiveScreenshot"
+    },
+    {
+      "parameters": {
+        "path": "get-transaction-screenshot",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*",
+          "binaryPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        304,
+        -16
+      ],
+      "id": "5e1db65e-e1b7-4206-8bed-22046530e7a1",
+      "name": "Backend",
+      "webhookId": "9caf7886-8ff7-4c24-966c-94206bd0c50c",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "path": "txnscreen",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -480,
+        -32
+      ],
+      "id": "248a98cf-b0f8-4c74-a39d-f83e3c235b0f",
+      "name": "Frontend",
+      "webhookId": "6f6f91f3-6b06-4c5d-8cfc-f5f2051c4efa"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get HTML from mail \nconst html = $input.first().json.html || '<h1>No content</h1>';\n\n// Encode to  Base64\nconst base64 = Buffer.from(html, 'utf-8').toString('base64');\n\n// Init Data URL\nconst url = `data:text/html;base64,${base64}`;\n\nreturn [\n  { json: { url } }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        -32
+      ],
+      "id": "ba6425d4-d1d8-4c4c-9803-f8b11973af6d",
+      "name": "ConvertToBase64",
+      "alwaysOutputData": false
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Extract TransactionId": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Response": {
+      "main": [
+        [
+          {
+            "node": "GiveLoading",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "ConvertToBase64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "youremail@gmail.com": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Puppeteer": {
+      "main": [
+        [
+          {
+            "node": "GiveScreenshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GiveLoading": {
+      "main": [
+        []
+      ]
+    },
+    "Backend": {
+      "main": [
+        [
+          {
+            "node": "youremail@gmail.com",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Frontend": {
+      "main": [
+        [
+          {
+            "node": "Extract TransactionId",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ConvertToBase64": {
+      "main": [
+        [
+          {
+            "node": "Puppeteer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "YqiIUFP0P9OeeNt8",
+    "timezone": "Europe/Bucharest"
+  },
+  "versionId": "e76fd7f8-9514-498f-8135-b187c06004f5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "af95bafb77460a39a122b216b66473d6e1c59ced66c3bba1da34b6e626756ee1"
+  },
+  "id": "TfFn9HDGSVjWUrFo",
+  "tags": []
+}
